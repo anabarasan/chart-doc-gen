@@ -22,6 +22,7 @@ type DocInfo struct {
 	Chart         ChartInfo      `json:"chart"`
 	Prerequisites []string       `json:"prerequisites"`
 	Release       ReleaseInfo    `json:"release"`
+	Validation    []string       `json:"validation"`
 }
 
 type ProjectInfo struct {
