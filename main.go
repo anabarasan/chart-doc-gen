@@ -20,8 +20,9 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"io/ioutil"
+	iofs "io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/template"
 
@@ -30,14 +31,16 @@ import (
 
 	"github.com/olekukonko/tablewriter"
 	flag "github.com/spf13/pflag"
-	y2 "k8s.io/apimachinery/pkg/util/yaml"
+	ylib "k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/kustomize/kyaml/yaml"
+	yaml2 "sigs.k8s.io/yaml"
 )
 
 var (
-	docFile    *string = flag.StringP("doc", "d", "", "Path to a project's doc.{json|yaml} info file")
-	valuesFile *string = flag.StringP("values", "v", "", "Path to chart values file")
-	tplFile    *string = flag.StringP("template", "t", "readme2.tpl", "Path to a doc template file")
+	docFile    = flag.StringP("doc", "d", "", "Path to a project's doc.{json|yaml} info file")
+	chartFile  = flag.StringP("chart", "c", "", "Path to Chart.yaml file")
+	valuesFile = flag.StringP("values", "v", "", "Path to chart values file")
+	tplFile    = flag.StringP("template", "t", "readme2.tpl", "Path to a doc template file")
 )
 
 func main() {
@@ -47,14 +50,14 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	reader := y2.NewYAMLOrJSONDecoder(f, 2048)
+	reader := ylib.NewYAMLOrJSONDecoder(f, 2048)
 	var doc api.DocInfo
 	err = reader.Decode(&doc)
 	if err != nil && err != io.EOF {
 		panic(err)
 	}
 
-	data, err := ioutil.ReadFile(*valuesFile)
+	data, err := os.ReadFile(*valuesFile)
 	if err != nil {
 		panic(err)
 	}
@@ -70,7 +73,14 @@ func main() {
 			params = append(params, []string{
 				row[0],
 				row[1],
-				fmt.Sprintf("`%s`", row[2]),
+				fmt.Sprintf(
+					"<code>%s</code>", // use a html code block instead of backtics so the whole block get highlighted
+					strings.ReplaceAll( // replace all newlines, they generate new table columns with tablewriter
+						strings.ReplaceAll(row[2], "|", "&#124;"), // replace all pipe symbols with their ACSII representation, because they break the markdown table
+						"\n",
+						"&#13;&#10;",
+					),
+				),
 			})
 		}
 
@@ -107,10 +117,26 @@ func main() {
 		panic(err)
 	}
 
-	tplReadme, err := ioutil.ReadFile(*tplFile)
+	{
+		if *chartFile == "" {
+			*chartFile = filepath.Join(filepath.Dir(*valuesFile), "Chart.yaml")
+		}
+		data, err := os.ReadFile(*chartFile)
+		if err != nil {
+			panic(err)
+		}
+		var ci api.ChartInfo
+		if err = yaml2.Unmarshal(data, &ci); err != nil {
+			panic(err)
+		}
+		doc.Chart.Name = ci.Name
+		doc.Chart.Version = ci.Version
+	}
+
+	tplReadme, err := os.ReadFile(*tplFile)
 	if err != nil {
 		if os.IsNotExist(err) {
-			tplReadme, err = templates.Asset("readme.tpl")
+			tplReadme, err = iofs.ReadFile(templates.FS(), "readme.tpl")
 			if err != nil {
 				panic(err)
 			}
